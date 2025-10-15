@@ -185,8 +185,9 @@
             const affiliateCode =
                 urlParams.get("ref") || urlParams.get("code") || "organic";
             const visitorId = generateVisitorId();
-            const fingerprint = collectNormalizedFingerprint();
 
+            // Initialize on page load
+            const fingerprint = collectEnhancedFingerprint();
             showDebugInfo();
             trackVisit();
 
@@ -203,8 +204,8 @@
                 return vid;
             }
 
-            function collectNormalizedFingerprint() {
-                // Only use stable, cross-platform fields
+            function collectEnhancedFingerprint() {
+                // TIER 1: Basic cross-platform
                 const lang = (navigator.language || "en")
                     .split("-")[0]
                     .toLowerCase();
@@ -212,7 +213,6 @@
                     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
                 ).split("/")[0];
 
-                // Estimate physical screen width (account for devicePixelRatio)
                 const dpi = window.devicePixelRatio || 1;
                 const physicalWidth = Math.round(screen.width * dpi);
 
@@ -222,17 +222,93 @@
                 else if (physicalWidth >= 720) screenClass = "720p";
                 else screenClass = "low";
 
-                return {
-                    os: "Android", // assume mobile traffic
+                const basicFp = {
+                    os: "Android",
                     screenClass: screenClass,
                     language: lang,
                     timezoneRegion: tzRegion,
                     touch: "ontouchstart" in window,
                 };
+
+                // TIER 2: Enhanced with screen details
+                const aspectRatio = (screen.height / screen.width).toFixed(2);
+                const screenResolution = `${Math.round(screen.width * dpi)}x${Math.round(screen.height * dpi)}`;
+
+                // Density classification
+                let densityClass;
+                if (dpi <= 1) densityClass = "mdpi";
+                else if (dpi <= 1.5) densityClass = "hdpi";
+                else if (dpi <= 2) densityClass = "xhdpi";
+                else if (dpi <= 3) densityClass = "xxhdpi";
+                else if (dpi <= 4) densityClass = "xxxhdpi";
+                else densityClass = "ultra";
+
+                const enhancedFp = {
+                    ...basicFp,
+                    aspectRatio: aspectRatio,
+                    screenResolution: screenResolution,
+                    densityClass: densityClass,
+                };
+
+                // TIER 3: Device-specific (from user agent)
+                const ua = navigator.userAgent;
+                let brand = "unknown",
+                    deviceModel = "unknown",
+                    androidVersion = 0;
+
+                // Extract Android version
+                const androidMatch = ua.match(/Android (\d+)/);
+                if (androidMatch) {
+                    androidVersion = parseInt(androidMatch[1]);
+                }
+
+                // Extract device info (basic parsing)
+                const deviceMatch = ua.match(/\(([^)]+)\)/);
+                if (deviceMatch) {
+                    const parts = deviceMatch[1].split(";");
+                    if (parts.length >= 3) {
+                        deviceModel = parts[2].trim().toLowerCase();
+                    }
+                }
+
+                // Try to detect brand from UA
+                if (ua.includes("Samsung")) brand = "samsung";
+                else if (ua.includes("Pixel")) brand = "google";
+                else if (ua.includes("Xiaomi")) brand = "xiaomi";
+                else if (ua.includes("OnePlus")) brand = "oneplus";
+                else if (ua.includes("Huawei")) brand = "huawei";
+
+                const locale = navigator.language || "en-US";
+                const installHour = new Date().getHours();
+
+                const deviceFp = {
+                    ...enhancedFp,
+                    locale: locale,
+                    brand: brand,
+                    deviceModel: deviceModel,
+                    androidVersion: androidVersion,
+                };
+
+                // Generate tiered hashes
+                return {
+                    ...deviceFp,
+                    fingerprintHash: createConsistentFingerprintHash(
+                        basicFp,
+                        "fp_basic",
+                    ),
+                    fingerprintHashEnhanced: createConsistentFingerprintHash(
+                        enhancedFp,
+                        "fp_enh",
+                    ),
+                    fingerprintHashDevice: createConsistentFingerprintHash(
+                        deviceFp,
+                        "fp_dev",
+                    ),
+                    installHour: installHour,
+                };
             }
 
-            function createConsistentFingerprintHash(fp) {
-                // Sort keys to ensure identical JSON string across platforms
+            function createConsistentFingerprintHash(fp, prefix) {
                 const sortedKeys = Object.keys(fp).sort();
                 const sortedObj = {};
                 sortedKeys.forEach((key) => {
@@ -244,20 +320,27 @@
                     hash = (hash << 5) - hash + str.charCodeAt(i);
                     hash = hash & hash;
                 }
-                return "fp_" + Math.abs(hash).toString(36);
+                return prefix + "_" + Math.abs(hash).toString(36);
             }
 
             async function trackVisit() {
-                const fingerprintHash =
-                    createConsistentFingerprintHash(fingerprint);
                 const data = {
                     affiliateCode,
                     visitorId,
                     fingerprint,
-                    fingerprintHash,
+                    fingerprintHash: fingerprint.fingerprintHash,
+                    fingerprintHashEnhanced:
+                        fingerprint.fingerprintHashEnhanced,
+                    fingerprintHashDevice: fingerprint.fingerprintHashDevice,
                     timestamp: Date.now(),
                     url: window.location.href,
                 };
+
+                console.log("🔍 Fingerprint tiers:", {
+                    basic: fingerprint.fingerprintHash,
+                    enhanced: fingerprint.fingerprintHashEnhanced,
+                    device: fingerprint.fingerprintHashDevice,
+                });
 
                 localStorage.setItem("whale_tracking", JSON.stringify(data));
 
@@ -311,16 +394,17 @@
                 }, 2000);
             }
 
-            // Removed openApp() — not needed for fingerprint-only flow
-
             function showDebugInfo() {
-                const fpHash = createConsistentFingerprintHash(fingerprint);
                 document.getElementById("debugContent").textContent =
                     JSON.stringify(
                         {
                             affiliateCode,
                             visitorId,
-                            fingerprintHash: fpHash,
+                            fingerprintHashes: {
+                                basic: fingerprint.fingerprintHash,
+                                enhanced: fingerprint.fingerprintHashEnhanced,
+                                device: fingerprint.fingerprintHashDevice,
+                            },
                             fingerprint: fingerprint,
                             apiEndpoint: API_ENDPOINT,
                         },
