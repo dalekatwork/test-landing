@@ -233,14 +233,26 @@
                 // TIER 2: Enhanced with screen details
                 const dpi = window.devicePixelRatio || 1;
 
-                // Use availHeight to exclude browser chrome (address bar, etc.)
-                // This more closely matches Android's usable screen height
-                const screenHeight = screen.availHeight || screen.height;
-                const screenWidth = screen.width;
+                // Get physical pixels by multiplying CSS pixels by DPI
+                // This matches what Android reports
+                const physicalWidth = Math.round(screen.width * dpi);
+                const physicalHeight = Math.round(
+                    (screen.availHeight || screen.height) * dpi,
+                );
 
                 // Round aspect ratio to 1 decimal to be more forgiving
-                const aspectRatio = (screenHeight / screenWidth).toFixed(1);
-                const screenResolution = `${screenWidth}x${screenHeight}`;
+                const aspectRatio = (physicalHeight / physicalWidth).toFixed(1);
+                const screenResolution = `${physicalWidth}x${physicalHeight}`;
+
+                // Recalculate screenClass based on physical width
+                let screenClassAdjusted;
+                if (physicalWidth >= 1440) screenClassAdjusted = "1440p";
+                else if (physicalWidth >= 1080) screenClassAdjusted = "1080p";
+                else if (physicalWidth >= 720) screenClassAdjusted = "720p";
+                else screenClassAdjusted = "low";
+
+                // Update basicFp with correct screenClass
+                basicFp.screenClass = screenClassAdjusted;
 
                 // Density classification based on devicePixelRatio
                 let densityClass;
@@ -469,6 +481,13 @@
                             },
                             fingerprint: fingerprint,
                             apiEndpoint: API_ENDPOINT,
+                            userAgent: navigator.userAgent,
+                            screenInfo: {
+                                cssWidth: screen.width,
+                                cssHeight: screen.height,
+                                availHeight: screen.availHeight,
+                                dpi: window.devicePixelRatio,
+                            },
                         },
                         null,
                         2,
