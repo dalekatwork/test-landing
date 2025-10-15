@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Download Whale App</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .container {
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                max-width: 500px;
+                width: 100%;
+                padding: 40px;
+                text-align: center;
+            }
+            .logo {
+                width: 100px;
+                height: 100px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 50%;
+                margin: 0 auto 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 48px;
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+                font-size: 28px;
+            }
+            .tagline {
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 16px;
+            }
+            .step {
+                display: none;
+            }
+            .step.active {
+                display: block;
+            }
+            .btn {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                padding: 15px 40px;
+                border-radius: 50px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+                width: 100%;
+                margin-top: 20px;
+                transition: transform 0.2s;
+            }
+            .btn:hover {
+                transform: translateY(-2px);
+            }
+            .instructions {
+                background: #f5f5f5;
+                border-radius: 10px;
+                padding: 20px;
+                margin-top: 20px;
+                text-align: left;
+            }
+            .instructions ol {
+                margin-left: 20px;
+                color: #555;
+                line-height: 1.8;
+            }
+            .status {
+                color: #666;
+                margin-top: 15px;
+                font-size: 14px;
+            }
+            .success {
+                color: #4caf50;
+            }
+            .loading {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 3px solid #f3f3f3;
+                border-top: 3px solid #667eea;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+            .debug-info {
+                margin-top: 20px;
+                padding: 15px;
+                background: #f0f0f0;
+                border-radius: 10px;
+                font-size: 11px;
+                text-align: left;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            .debug-info pre {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+            .log-entry {
+                margin-top: 10px;
+                padding: 5px;
+                background: #fff;
+                border-radius: 5px;
+                font-size: 10px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">🐋</div>
+            <h1>Whale App</h1>
+            <p class="tagline">Play & Earn Rewards</p>
+
+            <div id="step1" class="step active">
+                <p>Download the app to get started!</p>
+                <button class="btn" onclick="startDownload()">
+                    Download APK
+                </button>
+                <div class="status" id="status1"></div>
+            </div>
+
+            <div id="step2" class="step">
+                <h2 style="color: #4caf50; margin-bottom: 20px">
+                    ✓ Download Started
+                </h2>
+                <div class="instructions">
+                    <p style="font-weight: 600; margin-bottom: 15px">
+                        Installation Steps:
+                    </p>
+                    <ol>
+                        <li>Find <strong>whale.apk</strong> in Downloads</li>
+                        <li>Tap to open it</li>
+                        <li>Allow "Install from unknown sources"</li>
+                        <li>Complete installation</li>
+                        <li>Click "Open App" below</li>
+                    </ol>
+                </div>
+                <button class="btn" onclick="openApp()">Open Whale App</button>
+            </div>
+
+            <div id="debug" class="debug-info">
+                <strong>Debug Info:</strong>
+                <pre id="debugContent"></pre>
+                <div id="responseLog"></div>
+            </div>
+        </div>
+
+        <script>
+            const API_ENDPOINT =
+                "https://test-whale-apk-attribution-672136592763.europe-west1.run.app";
+            const APK_URL =
+                "https://drive.google.com/uc?export=download&id=1MmcnUcwU0X_UBsn3Uzd6d7CjZKxWEFOJ";
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const affiliateCode =
+                urlParams.get("ref") || urlParams.get("code") || "organic";
+            const visitorId = generateVisitorId();
+            const fingerprint = collectFingerprint();
+
+            showDebugInfo();
+            trackVisit();
+
+            function generateVisitorId() {
+                let vid = localStorage.getItem("whale_visitor_id");
+                if (!vid) {
+                    vid =
+                        "vid_" +
+                        Date.now() +
+                        "_" +
+                        Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem("whale_visitor_id", vid);
+                }
+                return vid;
+            }
+
+            function collectFingerprint() {
+                return {
+                    userAgent: navigator.userAgent,
+                    language: navigator.language,
+                    platform: navigator.platform,
+                    screenResolution: screen.width + "x" + screen.height,
+                    colorDepth: screen.colorDepth,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    touchSupport: "ontouchstart" in window,
+                    timestamp: Date.now(),
+                };
+            }
+
+            function createFingerprintHash(fp) {
+                const str = JSON.stringify(fp);
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    hash = (hash << 5) - hash + str.charCodeAt(i);
+                    hash = hash & hash;
+                }
+                return "fp_" + Math.abs(hash).toString(36);
+            }
+
+            async function trackVisit() {
+                const fingerprintHash = createFingerprintHash(fingerprint);
+                const data = {
+                    affiliateCode,
+                    visitorId,
+                    fingerprint,
+                    fingerprintHash,
+                    timestamp: Date.now(),
+                    url: window.location.href,
+                };
+
+                localStorage.setItem("whale_tracking", JSON.stringify(data));
+
+                try {
+                    logResponse("📤 Tracking visit...", data);
+                    const response = await fetch(
+                        API_ENDPOINT + "/track-visit",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(data),
+                        },
+                    );
+
+                    const result = await response.json();
+                    if (response.ok) {
+                        logResponse("✅ Visit tracked", result);
+                        document.getElementById("status1").innerHTML =
+                            '<span class="success">✓ Ready</span>';
+                    } else {
+                        logResponse("❌ Error", result);
+                    }
+                } catch (error) {
+                    logResponse("❌ Network error", error.message);
+                }
+            }
+
+            async function startDownload() {
+                document.getElementById("status1").innerHTML =
+                    '<span class="loading"></span>Starting...';
+
+                try {
+                    await fetch(API_ENDPOINT + "/track-download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            affiliateCode,
+                            visitorId,
+                            timestamp: Date.now(),
+                        }),
+                    });
+                } catch (error) {
+                    console.error(error);
+                }
+
+                window.location.href = APK_URL;
+
+                setTimeout(() => {
+                    document.getElementById("step1").classList.remove("active");
+                    document.getElementById("step2").classList.add("active");
+                }, 2000);
+            }
+
+            function openApp() {
+                const deepLink =
+                    "whale://launch?ref=" + affiliateCode + "&vid=" + visitorId;
+                logResponse("🚀 Opening app", deepLink);
+                window.location.href = deepLink;
+
+                fetch(API_ENDPOINT + "/track-open", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        affiliateCode,
+                        visitorId,
+                        timestamp: Date.now(),
+                    }),
+                }).catch(console.error);
+            }
+
+            function showDebugInfo() {
+                document.getElementById("debugContent").textContent =
+                    JSON.stringify(
+                        {
+                            affiliateCode,
+                            visitorId,
+                            fingerprintHash: createFingerprintHash(fingerprint),
+                            apiEndpoint: API_ENDPOINT,
+                        },
+                        null,
+                        2,
+                    );
+            }
+
+            function logResponse(message, data) {
+                const log = document.getElementById("responseLog");
+                const entry = document.createElement("div");
+                entry.className = "log-entry";
+                entry.innerHTML =
+                    "<strong>" +
+                    message +
+                    "</strong><br><pre>" +
+                    JSON.stringify(data, null, 2) +
+                    "</pre>";
+                log.appendChild(entry);
+            }
+        </script>
+    </body>
+</html>
