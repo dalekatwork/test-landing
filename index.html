@@ -213,13 +213,13 @@
                     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
                 ).split("/")[0];
 
-                const dpi = window.devicePixelRatio || 1;
-                const physicalWidth = Math.round(screen.width * dpi);
+                // Use LOGICAL width like Android does (not physical)
+                const logicalWidth = screen.width;
 
                 let screenClass;
-                if (physicalWidth >= 1440) screenClass = "1440p";
-                else if (physicalWidth >= 1080) screenClass = "1080p";
-                else if (physicalWidth >= 720) screenClass = "720p";
+                if (logicalWidth >= 1440) screenClass = "1440p";
+                else if (logicalWidth >= 1080) screenClass = "1080p";
+                else if (logicalWidth >= 720) screenClass = "720p";
                 else screenClass = "low";
 
                 const basicFp = {
@@ -231,10 +231,18 @@
                 };
 
                 // TIER 2: Enhanced with screen details
-                const aspectRatio = (screen.height / screen.width).toFixed(2);
-                const screenResolution = `${Math.round(screen.width * dpi)}x${Math.round(screen.height * dpi)}`;
+                const dpi = window.devicePixelRatio || 1;
 
-                // Density classification
+                // Use availHeight to exclude browser chrome (address bar, etc.)
+                // This more closely matches Android's usable screen height
+                const screenHeight = screen.availHeight || screen.height;
+                const screenWidth = screen.width;
+
+                // Round aspect ratio to 1 decimal to be more forgiving
+                const aspectRatio = (screenHeight / screenWidth).toFixed(1);
+                const screenResolution = `${screenWidth}x${screenHeight}`;
+
+                // Density classification based on devicePixelRatio
                 let densityClass;
                 if (dpi <= 1) densityClass = "mdpi";
                 else if (dpi <= 1.5) densityClass = "hdpi";
@@ -250,33 +258,86 @@
                     densityClass: densityClass,
                 };
 
-                // TIER 3: Device-specific (from user agent)
+                // TIER 3: Device-specific (from user agent and platform info)
                 const ua = navigator.userAgent;
                 let brand = "unknown",
+                    manufacturer = "unknown",
                     deviceModel = "unknown",
                     androidVersion = 0;
 
-                // Extract Android version
+                // Extract Android version (API level approximation)
                 const androidMatch = ua.match(/Android (\d+)/);
                 if (androidMatch) {
-                    androidVersion = parseInt(androidMatch[1]);
+                    const osVersion = parseInt(androidMatch[1]);
+                    // Convert OS version to API level
+                    if (osVersion >= 15) androidVersion = 35;
+                    else if (osVersion >= 14) androidVersion = 34;
+                    else if (osVersion >= 13) androidVersion = 33;
+                    else if (osVersion >= 12) androidVersion = 32;
+                    else if (osVersion >= 11) androidVersion = 30;
+                    else if (osVersion >= 10) androidVersion = 29;
+                    else androidVersion = 28;
                 }
 
-                // Extract device info (basic parsing)
-                const deviceMatch = ua.match(/\(([^)]+)\)/);
-                if (deviceMatch) {
-                    const parts = deviceMatch[1].split(";");
-                    if (parts.length >= 3) {
-                        deviceModel = parts[2].trim().toLowerCase();
+                // Enhanced device detection for various UA formats
+                // Try Chrome Mobile format first
+                let pixelMatch = ua.match(/Pixel (\d+[a-zA-Z]*)/i);
+                if (pixelMatch) {
+                    deviceModel = `pixel ${pixelMatch[1]}`.toLowerCase();
+                    brand = "google";
+                    manufacturer = "google";
+                } else {
+                    // Try Firefox Mobile format: look for Build/...
+                    const buildMatch = ua.match(/Build\/[^)]*Pixel[_ ]?(\d+)/i);
+                    if (buildMatch) {
+                        deviceModel = `pixel ${buildMatch[1]}`.toLowerCase();
+                        brand = "google";
+                        manufacturer = "google";
+                    } else {
+                        // Generic device extraction from semicolon-separated UA
+                        const deviceMatch = ua.match(/;\s*([^;)]+)\s+Build\//i);
+                        if (deviceMatch) {
+                            const detected = deviceMatch[1]
+                                .trim()
+                                .toLowerCase();
+                            // Check if it looks like a Pixel
+                            if (detected.includes("pixel")) {
+                                const pixelNum = detected.match(/(\d+)/);
+                                if (pixelNum) {
+                                    deviceModel = `pixel ${pixelNum[1]}`;
+                                    brand = "google";
+                                    manufacturer = "google";
+                                }
+                            } else {
+                                deviceModel = detected;
+                            }
+                        }
                     }
                 }
 
-                // Try to detect brand from UA
-                if (ua.includes("Samsung")) brand = "samsung";
-                else if (ua.includes("Pixel")) brand = "google";
-                else if (ua.includes("Xiaomi")) brand = "xiaomi";
-                else if (ua.includes("OnePlus")) brand = "oneplus";
-                else if (ua.includes("Huawei")) brand = "huawei";
+                // Try to detect other brands from UA if not already set
+                if (brand === "unknown") {
+                    if (ua.includes("Samsung") || ua.includes("SM-")) {
+                        brand = "samsung";
+                        manufacturer = "samsung";
+                    } else if (
+                        ua.includes("Xiaomi") ||
+                        ua.includes("MI ") ||
+                        ua.includes("Redmi")
+                    ) {
+                        brand = "xiaomi";
+                        manufacturer = "xiaomi";
+                    } else if (
+                        ua.includes("OnePlus") ||
+                        ua.includes("ONEPLUS")
+                    ) {
+                        brand = "oneplus";
+                        manufacturer = "oneplus";
+                    } else if (ua.includes("Huawei") || ua.includes("HUAWEI")) {
+                        brand = "huawei";
+                        manufacturer = "huawei";
+                    }
+                }
 
                 const locale = navigator.language || "en-US";
                 const installHour = new Date().getHours();
@@ -285,6 +346,7 @@
                     ...enhancedFp,
                     locale: locale,
                     brand: brand,
+                    manufacturer: manufacturer,
                     deviceModel: deviceModel,
                     androidVersion: androidVersion,
                 };
