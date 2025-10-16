@@ -190,16 +190,18 @@
             const API_ENDPOINT =
                 "https://test-whale-apk-attribution-672136592763.europe-west1.run.app";
             const APK_URL =
-                "https://drive.google.com/uc?export=download&id=1MmcnUcwU0X_UBsn3Uzd6d7CjZKxWEFOJ";
+                "https://drive.google.com/uc?export=download&id=1MmcnUcwU0X_UBsnUzd6d7CjZKxWEFOJ";
 
             const urlParams = new URLSearchParams(window.location.search);
             const affiliateCode =
                 urlParams.get("ref") || urlParams.get("code") || "organic";
             const visitorId = generateVisitorId();
 
-            const fingerprint = collectDeviceFingerprint();
-            showDebugInfo();
-            trackVisit();
+            let aaid = null;
+            let fingerprint = collectDeviceFingerprint();
+
+            // Initialize and track visit
+            initializeAAID();
 
             function generateVisitorId() {
                 let vid = localStorage.getItem("whale_visitor_id");
@@ -214,23 +216,126 @@
                 return vid;
             }
 
+            // NEW: Function to get Android Advertising ID
+            async function initializeAAID() {
+                showDebugInfo(); // Initial debug info
+
+                try {
+                    // Check if we're in a supported environment
+                    if ("getAdvertisingId" in navigator) {
+                        document.getElementById("status1").innerHTML =
+                            '<span class="loading"></span>Getting device ID...';
+
+                        const aaidInfo = await navigator.getAdvertisingId();
+                        aaid = aaidInfo.id;
+
+                        logToDebug("✅ AAID retrieved: " + aaid);
+                        document.getElementById("status1").innerHTML =
+                            '<span class="success">✓ Ready with AAID</span>';
+
+                        // Track visit with AAID
+                        await trackVisit();
+                    } else {
+                        logToDebug(
+                            "⚠️ AAID API not available, falling back to fingerprint",
+                        );
+                        document.getElementById("status1").innerHTML =
+                            '<span class="success">✓ Ready (fallback mode)</span>';
+                        await trackVisit();
+                    }
+                } catch (error) {
+                    logToDebug("❌ AAID error: " + error.message);
+                    document.getElementById("status1").innerHTML =
+                        '<span class="success">✓ Ready (fallback)</span>';
+                    await trackVisit();
+                }
+
+                showDebugInfo(); // Update with AAID info
+            }
+
+            async function trackVisit() {
+                const data = {
+                    affiliateCode,
+                    visitorId,
+                    aaid: aaid, // NEW: Include AAID
+                    fingerprint,
+                    fingerprintHash: fingerprint.fingerprintHash,
+                    fingerprintHashEnhanced:
+                        fingerprint.fingerprintHashEnhanced,
+                    timestamp: Date.now(),
+                    url: window.location.href,
+                    userAgent: navigator.userAgent,
+                };
+
+                localStorage.setItem("whale_tracking", JSON.stringify(data));
+
+                try {
+                    const response = await fetch(
+                        API_ENDPOINT + "/track-visit",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(data),
+                        },
+                    );
+                    const result = await response.json();
+                    if (response.ok) {
+                        logToDebug("✅ Visit tracked successfully");
+                    }
+                } catch (error) {
+                    console.error("Track visit failed:", error);
+                    logToDebug("❌ Visit tracking failed: " + error.message);
+                }
+            }
+
+            async function startDownload() {
+                document.getElementById("status1").innerHTML =
+                    '<span class="loading"></span>Starting download...';
+
+                // Track download with AAID
+                try {
+                    await fetch(API_ENDPOINT + "/track-download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            affiliateCode,
+                            visitorId,
+                            aaid: aaid, // NEW: Include AAID in download tracking
+                            timestamp: Date.now(),
+                        }),
+                    });
+                    logToDebug("✅ Download tracked");
+                } catch (error) {
+                    console.error("Track download failed:", error);
+                    logToDebug("❌ Download tracking failed: " + error.message);
+                }
+
+                // Start download
+                window.location.href = APK_URL;
+
+                setTimeout(() => {
+                    document.getElementById("step1").classList.remove("active");
+                    document.getElementById("step2").classList.add("active");
+                }, 2000);
+            }
+
+            // NEW: Debug logging function
+            function logToDebug(message) {
+                const logEntry = document.createElement("div");
+                logEntry.className = "log-entry";
+                logEntry.textContent =
+                    new Date().toLocaleTimeString() + " - " + message;
+                document.getElementById("responseLog").appendChild(logEntry);
+            }
+
             function collectDeviceFingerprint() {
-                // CRITICAL FIX: Use physical pixels, not CSS pixels
+                // Keep your existing fingerprint code as fallback
                 const dpr = window.devicePixelRatio || 1;
                 const physicalWidth = Math.round(screen.width * dpr);
                 const physicalHeight = Math.round(
                     (screen.availHeight || screen.height) * dpr,
                 );
 
-                console.log("📱 Device info:", {
-                    cssWidth: screen.width,
-                    cssHeight: screen.height,
-                    dpr: dpr,
-                    physicalWidth: physicalWidth,
-                    physicalHeight: physicalHeight,
-                });
-
-                // Screen class based on physical width
                 const screenClass =
                     physicalWidth >= 1440
                         ? "1440p"
@@ -240,7 +345,6 @@
                             ? "720p"
                             : "low";
 
-                // Aspect ratio based on physical dimensions
                 const ratio = physicalHeight / physicalWidth;
                 const aspectBucket =
                     ratio >= 2.3
@@ -253,10 +357,7 @@
                               ? "1.7-1.85"
                               : "1.7-";
 
-                // Round physical width to nearest 10
                 const screenSignature = `${Math.round(physicalWidth / 10) * 10}px_${aspectBucket}`;
-
-                // Density class
                 const densityClass =
                     dpr <= 1
                         ? "mdpi"
@@ -270,7 +371,6 @@
                                 ? "xxxhdpi"
                                 : "ultra";
 
-                // Fingerprint WITHOUT language
                 const basicFp = {
                     os: "Android",
                     screenClass: screenClass,
@@ -310,76 +410,20 @@
                 return `${prefix}_${Math.abs(hash).toString(36)}`;
             }
 
-            async function trackVisit() {
-                const data = {
-                    affiliateCode,
-                    visitorId,
-                    fingerprint,
-                    fingerprintHash: fingerprint.fingerprintHash,
-                    fingerprintHashEnhanced:
-                        fingerprint.fingerprintHashEnhanced,
-                    timestamp: Date.now(),
-                    url: window.location.href,
-                };
-
-                localStorage.setItem("whale_tracking", JSON.stringify(data));
-
-                try {
-                    const response = await fetch(
-                        API_ENDPOINT + "/track-visit",
-                        {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(data),
-                        },
-                    );
-                    const result = await response.json();
-                    if (response.ok) {
-                        document.getElementById("status1").innerHTML =
-                            '<span class="success">✓ Ready</span>';
-                    }
-                } catch (error) {
-                    console.error("Track visit failed:", error);
-                }
-            }
-
-            async function startDownload() {
-                document.getElementById("status1").innerHTML =
-                    '<span class="loading"></span>Starting...';
-
-                try {
-                    await fetch(API_ENDPOINT + "/track-download", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            affiliateCode,
-                            visitorId,
-                            timestamp: Date.now(),
-                        }),
-                    });
-                } catch (error) {
-                    console.error("Track download failed:", error);
-                }
-
-                window.location.href = APK_URL;
-
-                setTimeout(() => {
-                    document.getElementById("step1").classList.remove("active");
-                    document.getElementById("step2").classList.add("active");
-                }, 2000);
-            }
-
             function showDebugInfo() {
                 document.getElementById("debugContent").textContent =
                     JSON.stringify(
                         {
                             affiliateCode,
                             visitorId,
+                            aaid: aaid, // NEW: Show AAID in debug
                             fingerprintHashes: {
                                 basic: fingerprint.fingerprintHash,
                                 enhanced: fingerprint.fingerprintHashEnhanced,
                             },
                             fingerprint: fingerprint,
+                            hasAAID: !!aaid,
+                            aaIDApiAvailable: "getAdvertisingId" in navigator,
                         },
                         null,
                         2,
