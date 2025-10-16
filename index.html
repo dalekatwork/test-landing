@@ -184,8 +184,8 @@
         <script>
             const API_ENDPOINT =
                 "https://test-whale-apk-attribution-672136592763.europe-west1.run.app";
-            const APK_URL =
-                "https://drive.google.com/uc?export=download&id=1MmcnUcwU0X_UBsnUzd6d7CjZKxWEFOJ";
+            const APK_BASE_URL =
+                "https://crashgame-prod.b-cdn.net/testing-pooja-dev-app-updates/whale.apk";
 
             const urlParams = new URLSearchParams(window.location.search);
             const affiliateCode =
@@ -456,27 +456,44 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting download...';
 
-                // Track download
+                const installId = identifiers.installToken;
+                const downloadUrl = `${APK_BASE_URL}?install_id=${encodeURIComponent(installId)}&ref=${encodeURIComponent(affiliateCode)}`;
+
+                // Track the download with this install_id - ADD TIMEOUT
                 try {
-                    await fetch(API_ENDPOINT + "/track-download", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            affiliateCode: affiliateCode,
-                            visitorId: identifiers.visitorId,
-                            installToken: identifiers.installToken,
-                            deviceSignature: fingerprint.deviceSignature,
-                            matchingHashes: fingerprint.matchingHashes,
-                            timestamp: Date.now(),
-                        }),
-                    });
-                    logToDebug("✅ Download tracked");
+                    const trackingPromise = fetch(
+                        API_ENDPOINT + "/track-download",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                affiliateCode: affiliateCode,
+                                visitorId: identifiers.visitorId,
+                                installToken: installId,
+                                deviceSignature: fingerprint.deviceSignature,
+                                matchingHashes: fingerprint.matchingHashes,
+                                timestamp: Date.now(),
+                                downloadUrl: downloadUrl,
+                            }),
+                        },
+                    );
+
+                    // Wait max 2 seconds for tracking, then proceed with download anyway
+                    await Promise.race([
+                        trackingPromise,
+                        new Promise((resolve) => setTimeout(resolve, 2000)),
+                    ]);
+
+                    logToDebug(
+                        "✅ Download tracked with install_id: " + installId,
+                    );
                 } catch (error) {
                     logToDebug("⚠️ Download tracking failed: " + error.message);
+                    // Continue with download even if tracking fails
                 }
 
-                // Start download
-                window.location.href = APK_URL;
+                // Start download with the parameterized URL
+                window.location.href = downloadUrl;
 
                 // Show instructions after a delay
                 setTimeout(() => {
@@ -494,6 +511,9 @@
             }
 
             function showDebugInfo() {
+                const installId = identifiers.installToken;
+                const downloadUrl = `${APK_BASE_URL}?install_id=${installId}&ref=${affiliateCode}`;
+
                 const debugInfo = {
                     affiliateCode: affiliateCode,
                     identifiers: identifiers,
@@ -502,6 +522,7 @@
                     physicalScreen: fingerprint.physicalScreen,
                     platform: fingerprint.platformInfo.platform,
                     userAgent: navigator.userAgent.substring(0, 80) + "...",
+                    generatedDownloadUrl: downloadUrl, // ADD THIS
                 };
 
                 document.getElementById("debugContent").textContent =
