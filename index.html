@@ -453,54 +453,43 @@
             }
 
             async function startDownload() {
-                document.getElementById("status1").innerHTML =
-                    '<span class="loading"></span>Starting download...';
-
                 const installId = identifiers.installToken;
-                const downloadUrl = `${APK_BASE_URL}?install_id=${encodeURIComponent(installId)}&ref=${encodeURIComponent(affiliateCode)}`;
 
-                console.log("🔗 Download URL:", downloadUrl);
+                // Use URL fragment (hash) instead of query parameters
+                const downloadUrl = `${APK_BASE_URL}#install_id=${installId}&ref=${affiliateCode}`;
+
+                console.log(
+                    "🔗 NEW Download URL (with fragment):",
+                    downloadUrl,
+                );
                 logToDebug("🔗 Generated Download URL: " + downloadUrl);
 
-                localStorage.setItem("debug_download_url", downloadUrl);
-
-                // Track the download with this install_id - ADD TIMEOUT
+                // Track the download
                 try {
-                    const trackingPromise = fetch(
-                        API_ENDPOINT + "/track-download",
-                        {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                affiliateCode: affiliateCode,
-                                visitorId: identifiers.visitorId,
-                                installToken: installId,
-                                deviceSignature: fingerprint.deviceSignature,
-                                matchingHashes: fingerprint.matchingHashes,
-                                timestamp: Date.now(),
-                                downloadUrl: downloadUrl,
-                            }),
-                        },
-                    );
-
-                    // Wait max 2 seconds for tracking, then proceed with download anyway
-                    await Promise.race([
-                        trackingPromise,
-                        new Promise((resolve) => setTimeout(resolve, 2000)),
-                    ]);
-
+                    await fetch(API_ENDPOINT + "/track-download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            affiliateCode: affiliateCode,
+                            visitorId: identifiers.visitorId,
+                            installToken: installId,
+                            deviceSignature: fingerprint.deviceSignature,
+                            matchingHashes: fingerprint.matchingHashes,
+                            timestamp: Date.now(),
+                            downloadUrl: downloadUrl, // Log the new URL
+                        }),
+                    });
                     logToDebug(
                         "✅ Download tracked with install_id: " + installId,
                     );
                 } catch (error) {
                     logToDebug("⚠️ Download tracking failed: " + error.message);
-                    // Continue with download even if tracking fails
                 }
 
-                // Start download with the parameterized URL
+                // Start download with fragment URL
                 window.location.href = downloadUrl;
 
-                // Show instructions after a delay
+                // Show instructions
                 setTimeout(() => {
                     document.getElementById("step1").classList.remove("active");
                     document.getElementById("step2").classList.add("active");
@@ -517,7 +506,7 @@
 
             function showDebugInfo() {
                 const installId = identifiers.installToken;
-                const downloadUrl = `${APK_BASE_URL}?install_id=${installId}&ref=${affiliateCode}`;
+                const downloadUrl = `${APK_BASE_URL}#install_id=${installId}&ref=${affiliateCode}`;
 
                 const debugInfo = {
                     affiliateCode: affiliateCode,
