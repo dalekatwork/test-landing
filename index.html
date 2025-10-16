@@ -218,12 +218,30 @@
             function generateVisitorId() {
                 let vid = localStorage.getItem("whale_visitor_id");
                 if (!vid) {
-                    vid =
-                        "vid_" +
-                        Date.now() +
-                        "_" +
-                        Math.random().toString(36).substr(2, 9);
+                    // Create a highly unique visitor ID with multiple entropy sources
+                    const timestamp = Date.now();
+                    const randomPart = Math.random().toString(36).substr(2, 9);
+                    const randomPart2 = Math.random().toString(36).substr(2, 9);
+
+                    // Add browser-specific entropy
+                    const screenEntropy = `${screen.width}x${screen.height}x${window.devicePixelRatio}`;
+                    const navEntropy = `${navigator.hardwareConcurrency || 0}${navigator.deviceMemory || 0}`;
+
+                    // Create a complex hash from all entropy sources
+                    const entropyString = `${timestamp}${randomPart}${randomPart2}${screenEntropy}${navEntropy}${navigator.userAgent}`;
+
+                    // Simple hash function
+                    let hash = 0;
+                    for (let i = 0; i < entropyString.length; i++) {
+                        hash = (hash << 5) - hash + entropyString.charCodeAt(i);
+                        hash = hash & hash;
+                    }
+
+                    // Combine everything into a super unique ID
+                    vid = `vid_${timestamp}_${randomPart}_${Math.abs(hash).toString(36)}_${randomPart2}`;
+
                     localStorage.setItem("whale_visitor_id", vid);
+                    console.log("🆔 Generated new visitor ID:", vid);
                 }
                 return vid;
             }
@@ -360,11 +378,14 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting...';
 
-                // STEP 1: Copy tracking data to clipboard
+                // STEP 1: Create highly secure tracking data
+                const sessionToken = generateSessionToken();
                 const clipboardData = JSON.stringify({
                     vid: visitorId,
                     ref: affiliateCode,
                     ts: Date.now(),
+                    sid: sessionToken, // Session-specific token
+                    fp: fingerprint.fingerprintHash, // Include fingerprint as backup
                 });
 
                 try {
@@ -381,7 +402,7 @@
                     });
                 }
 
-                // STEP 2: Track download
+                // STEP 2: Track download with session token
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
@@ -389,6 +410,7 @@
                         body: JSON.stringify({
                             affiliateCode,
                             visitorId,
+                            sessionToken,
                             timestamp: Date.now(),
                         }),
                     });
@@ -404,6 +426,19 @@
                     document.getElementById("step1").classList.remove("active");
                     document.getElementById("step2").classList.add("active");
                 }, 2000);
+            }
+
+            function generateSessionToken() {
+                // Create a unique token for this specific download session
+                const timestamp = Date.now();
+                const random1 = Math.random().toString(36).substr(2, 12);
+                const random2 = Math.random().toString(36).substr(2, 12);
+                const performanceEntropy = performance
+                    .now()
+                    .toString(36)
+                    .replace(".", "");
+
+                return `sid_${timestamp}_${random1}${performanceEntropy}${random2}`;
             }
 
             function showDebugInfo() {
