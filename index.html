@@ -5,7 +5,6 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Download Whale App</title>
         <style>
-            /* Your existing CSS remains the same */
             * {
                 margin: 0;
                 padding: 0;
@@ -243,10 +242,11 @@
                 }
 
                 try {
-                    // Get private IP via WebRTC
-                    privateIP = await getPrivateIP();
+                    // Try multiple methods for private IP
+                    privateIP = await getPrivateIPWithFallbacks();
                 } catch (error) {
                     console.error("Failed to get private IP:", error);
+                    privateIP = "detection_failed";
                 }
 
                 return {
@@ -255,17 +255,38 @@
                 };
             }
 
-            function getPrivateIP() {
-                return new Promise((resolve) => {
-                    // Try WebRTC method first
-                    const pc = new RTCPeerConnection({
-                        iceServers: [],
-                    });
+            async function getPrivateIPWithFallbacks() {
+                // Method 1: WebRTC (most reliable when it works)
+                const webrtcIP = await getPrivateIPWebRTC();
+                if (
+                    webrtcIP &&
+                    webrtcIP !== "webrtc_timeout" &&
+                    webrtcIP !== "webrtc_failed" &&
+                    webrtcIP !== "webrtc_unavailable"
+                ) {
+                    return webrtcIP;
+                }
 
-                    pc.createDataChannel("");
-                    pc.createOffer()
-                        .then((offer) => pc.setLocalDescription(offer))
-                        .catch(() => resolve("webrtc_failed"));
+                // Method 2: Network Information API (newer browsers)
+                const networkIP = await getPrivateIPFromNetworkAPI();
+                if (networkIP && networkIP !== "network_api_unavailable") {
+                    return networkIP;
+                }
+
+                // Method 3: Use connection type as fallback
+                return "fallback_connection";
+            }
+
+            function getPrivateIPWebRTC() {
+                return new Promise((resolve) => {
+                    if (!window.RTCPeerConnection) {
+                        resolve("webrtc_unavailable");
+                        return;
+                    }
+
+                    const pc = new RTCPeerConnection({
+                        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+                    });
 
                     let foundIP = false;
 
@@ -273,25 +294,71 @@
                         if (!ice.candidate || foundIP) return;
 
                         const candidate = ice.candidate.candidate;
-                        // Parse IP from ICE candidate
-                        const ipMatch = candidate.match(
-                            /([0-9]{1,3}(\.[0-9]{1,3}){3})/,
-                        );
-                        if (ipMatch && ipMatch[1]) {
-                            foundIP = true;
-                            resolve(ipMatch[1]);
-                            pc.close();
+
+                        // Look for local IPs in candidate
+                        if (
+                            candidate.includes("typ host") ||
+                            candidate.includes("typ srflx")
+                        ) {
+                            const ipMatch = candidate.match(
+                                /([0-9]{1,3}(\.[0-9]{1,3}){3}|[a-f0-9:]+)/,
+                            );
+                            if (
+                                ipMatch &&
+                                ipMatch[1] &&
+                                !ipMatch[1].includes(":")
+                            ) {
+                                foundIP = true;
+                                resolve(ipMatch[1]);
+                                pc.close();
+                            }
                         }
                     };
 
-                    // Fallback timeout
+                    // Create data channel to trigger candidate gathering
+                    try {
+                        pc.createDataChannel("");
+                        pc.createOffer()
+                            .then((offer) => pc.setLocalDescription(offer))
+                            .catch(() => resolve("webrtc_failed"));
+                    } catch (error) {
+                        resolve("webrtc_error");
+                    }
+
+                    // Shorter timeout
                     setTimeout(() => {
                         if (!foundIP) {
                             resolve("webrtc_timeout");
-                            pc.close();
+                            try {
+                                pc.close();
+                            } catch (e) {}
                         }
-                    }, 2000);
+                    }, 1500);
                 });
+            }
+
+            async function getPrivateIPFromNetworkAPI() {
+                // Method 2: Network Information API
+                if ("connection" in navigator) {
+                    const connection = navigator.connection;
+                    if (connection) {
+                        if (connection.type === "wifi")
+                            return "wifi_connection";
+                        if (connection.type === "cellular")
+                            return "cellular_connection";
+                        if (connection.type === "ethernet")
+                            return "ethernet_connection";
+                        return `connection_${connection.type}`;
+                    }
+                }
+
+                // Method 3: User agent detection
+                if (navigator.userAgent.match(/Android/i))
+                    return "android_device";
+                if (navigator.userAgent.match(/iPhone|iPad/i))
+                    return "ios_device";
+
+                return "network_api_unavailable";
             }
 
             async function collectEnhancedFingerprint() {
@@ -409,6 +476,9 @@
                         : "unknown",
                     publicIP: ips.public,
                     privateIP: ips.private,
+                    userAgentHash: hashString(
+                        platformInfo.userAgent.substring(0, 100),
+                    ),
                 };
                 return `device_${hashObject(signatureData)}`;
             }
@@ -422,6 +492,7 @@
                     concurrency: platformInfo.hardwareConcurrency,
                     publicIP: ips.public,
                     privateIP: ips.private,
+                    language: platformInfo.language,
                 };
                 return `strict_${hashObject(data)}`;
             }
@@ -433,6 +504,7 @@
                     timezone: localeInfo.timezone,
                     language: localeInfo.locale,
                     publicIP: ips.public,
+                    privateIP: ips.private,
                 };
                 return `relaxed_${hashObject(data)}`;
             }
@@ -443,12 +515,23 @@
                     height: Math.round(physicalScreen.physicalHeight / 10) * 10,
                     dpr: Math.round(physicalScreen.dpr),
                     publicIP: ips.public,
+                    privateIP: ips.private,
                 };
                 return `basic_${hashObject(data)}`;
             }
 
             function hashObject(obj) {
                 const str = JSON.stringify(obj, Object.keys(obj).sort());
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = (hash << 5) - hash + char;
+                    hash = hash & hash;
+                }
+                return Math.abs(hash).toString(36);
+            }
+
+            function hashString(str) {
                 let hash = 0;
                 for (let i = 0; i < str.length; i++) {
                     const char = str.charCodeAt(i);
