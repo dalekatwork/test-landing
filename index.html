@@ -5,6 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Download Whale App</title>
         <style>
+            /* Your existing CSS remains the same */
             * {
                 margin: 0;
                 padding: 0;
@@ -80,11 +81,6 @@
                 margin-top: 20px;
                 text-align: left;
             }
-            .instructions ol {
-                margin-left: 20px;
-                color: #555;
-                line-height: 1.8;
-            }
             .status {
                 color: #666;
                 margin-top: 15px;
@@ -151,7 +147,6 @@
                 <h2 style="color: #4caf50; margin-bottom: 20px">
                     ✓ Download Started
                 </h2>
-
                 <div class="instructions">
                     <p style="font-weight: 600; margin-bottom: 15px">
                         Installation Steps:
@@ -195,79 +190,243 @@
             const urlParams = new URLSearchParams(window.location.search);
             const affiliateCode =
                 urlParams.get("ref") || urlParams.get("code") || "organic";
-            const visitorId = generateVisitorId();
 
-            let aaid = null;
-            let fingerprint = collectDeviceFingerprint();
+            // Generate identifiers
+            const identifiers = generateIdentifiers();
+            const fingerprint = collectEnhancedFingerprint();
 
-            // Initialize and track visit
-            initializeAAID();
+            // Initialize tracking immediately
+            initializeTracking();
 
-            function generateVisitorId() {
-                let vid = localStorage.getItem("whale_visitor_id");
-                if (!vid) {
-                    vid =
-                        "vid_" +
+            function generateIdentifiers() {
+                // Persistent Visitor ID
+                let visitorId = localStorage.getItem("whale_visitor_id");
+                if (!visitorId) {
+                    visitorId =
+                        "web_" +
                         Date.now() +
                         "_" +
                         Math.random().toString(36).substr(2, 9);
-                    localStorage.setItem("whale_visitor_id", vid);
+                    localStorage.setItem("whale_visitor_id", visitorId);
                 }
-                return vid;
+
+                // Installation token (for one-time matching)
+                let installToken = localStorage.getItem("whale_install_token");
+                if (!installToken) {
+                    installToken =
+                        "inst_" +
+                        Date.now() +
+                        "_" +
+                        Math.random().toString(36).substr(2, 12);
+                    localStorage.setItem("whale_install_token", installToken);
+                }
+
+                return {
+                    visitorId: visitorId,
+                    installToken: installToken,
+                    timestamp: Date.now(),
+                };
             }
 
-            // NEW: Function to get Android Advertising ID
-            async function initializeAAID() {
-                showDebugInfo(); // Initial debug info
+            function collectEnhancedFingerprint() {
+                const dpr = window.devicePixelRatio || 1;
+                const physicalWidth = Math.round(screen.width * dpr);
+                const physicalHeight = Math.round(
+                    (screen.availHeight || screen.height) * dpr,
+                );
+
+                // Get precise device characteristics
+                const screenProps = {
+                    width: screen.width,
+                    height: screen.height,
+                    availWidth: screen.availWidth,
+                    availHeight: screen.availHeight,
+                    colorDepth: screen.colorDepth,
+                    pixelDepth: screen.pixelDepth,
+                };
+
+                // Calculate physical dimensions (most reliable)
+                const physicalScreen = {
+                    physicalWidth: physicalWidth,
+                    physicalHeight: physicalHeight,
+                    dpr: dpr,
+                    // Standard Android screen size buckets
+                    screenBucket: getScreenBucket(
+                        physicalWidth,
+                        physicalHeight,
+                    ),
+                };
+
+                // Browser and OS detection
+                const platformInfo = {
+                    userAgent: navigator.userAgent,
+                    platform: navigator.platform,
+                    vendor: navigator.vendor,
+                    language: navigator.language,
+                    languages: navigator.languages
+                        ? navigator.languages.join(",")
+                        : "",
+                    cookieEnabled: navigator.cookieEnabled,
+                    maxTouchPoints: navigator.maxTouchPoints || 0,
+                };
+
+                // Timezone and locale
+                const localeInfo = {
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    locale: navigator.language,
+                    region:
+                        (
+                            Intl.DateTimeFormat().resolvedOptions().timeZone ||
+                            ""
+                        ).split("/")[0] || "Unknown",
+                };
+
+                // Hardware capabilities
+                const hardwareInfo = {
+                    hardwareConcurrency:
+                        navigator.hardwareConcurrency || "unknown",
+                    deviceMemory: navigator.deviceMemory || "unknown",
+                    touchSupport: "ontouchstart" in window,
+                    orientation: getOrientation(),
+                };
+
+                // Combine all fingerprints
+                const combinedFingerprint = {
+                    // Core device identity
+                    deviceSignature: createDeviceSignature(
+                        physicalScreen,
+                        platformInfo,
+                    ),
+
+                    // Individual components for matching
+                    physicalScreen: physicalScreen,
+                    platformInfo: platformInfo,
+                    localeInfo: localeInfo,
+                    hardwareInfo: hardwareInfo,
+
+                    // Hashes for different matching strategies
+                    strictHash: createStrictHash(physicalScreen, platformInfo),
+                    relaxedHash: createRelaxedHash(physicalScreen, localeInfo),
+                    basicHash: createBasicHash(physicalScreen),
+                };
+
+                return combinedFingerprint;
+            }
+
+            function getScreenBucket(width, height) {
+                const diagonal =
+                    Math.sqrt(width * width + height * height) / 160; // Convert to inches approximation
+
+                if (diagonal >= 6.5) return "large";
+                if (diagonal >= 5.5) return "medium";
+                return "small";
+            }
+
+            function getOrientation() {
+                if (screen.orientation) {
+                    return screen.orientation.type;
+                }
+                return window.innerWidth > window.innerHeight
+                    ? "landscape"
+                    : "portrait";
+            }
+
+            function createDeviceSignature(physicalScreen, platformInfo) {
+                // Create a stable device signature based on physical properties
+                const signatureData = {
+                    bucket: physicalScreen.screenBucket,
+                    dpr: Math.round(physicalScreen.dpr * 10) / 10, // Round to 1 decimal
+                    region: platformInfo.language
+                        ? platformInfo.language.split("-")[1] || "unknown"
+                        : "unknown",
+                };
+
+                return `device_${hashObject(signatureData)}`;
+            }
+
+            function createStrictHash(physicalScreen, platformInfo) {
+                const data = {
+                    physicalWidth: physicalScreen.physicalWidth,
+                    physicalHeight: physicalScreen.physicalHeight,
+                    dpr: physicalScreen.dpr,
+                    platform: platformInfo.platform,
+                    concurrency: platformInfo.hardwareConcurrency,
+                };
+                return `strict_${hashObject(data)}`;
+            }
+
+            function createRelaxedHash(physicalScreen, localeInfo) {
+                const data = {
+                    screenBucket: physicalScreen.screenBucket,
+                    dpr: Math.round(physicalScreen.dpr),
+                    timezone: localeInfo.timezone,
+                    language: localeInfo.locale,
+                };
+                return `relaxed_${hashObject(data)}`;
+            }
+
+            function createBasicHash(physicalScreen) {
+                const data = {
+                    width: Math.round(physicalScreen.physicalWidth / 10) * 10, // Round to nearest 10px
+                    height: Math.round(physicalScreen.physicalHeight / 10) * 10,
+                    dpr: Math.round(physicalScreen.dpr),
+                };
+                return `basic_${hashObject(data)}`;
+            }
+
+            function hashObject(obj) {
+                const str = JSON.stringify(obj, Object.keys(obj).sort());
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = (hash << 5) - hash + char;
+                    hash = hash & hash;
+                }
+                return Math.abs(hash).toString(36);
+            }
+
+            async function initializeTracking() {
+                showDebugInfo();
+
+                document.getElementById("status1").innerHTML =
+                    '<span class="loading"></span>Initializing...';
 
                 try {
-                    // Check if we're in a supported environment
-                    if ("getAdvertisingId" in navigator) {
-                        document.getElementById("status1").innerHTML =
-                            '<span class="loading"></span>Getting device ID...';
-
-                        const aaidInfo = await navigator.getAdvertisingId();
-                        aaid = aaidInfo.id;
-
-                        logToDebug("✅ AAID retrieved: " + aaid);
-                        document.getElementById("status1").innerHTML =
-                            '<span class="success">✓ Ready with AAID</span>';
-
-                        // Track visit with AAID
-                        await trackVisit();
-                    } else {
-                        logToDebug(
-                            "⚠️ AAID API not available, falling back to fingerprint",
-                        );
-                        document.getElementById("status1").innerHTML =
-                            '<span class="success">✓ Ready (fallback mode)</span>';
-                        await trackVisit();
-                    }
-                } catch (error) {
-                    logToDebug("❌ AAID error: " + error.message);
-                    document.getElementById("status1").innerHTML =
-                        '<span class="success">✓ Ready (fallback)</span>';
                     await trackVisit();
+                    document.getElementById("status1").innerHTML =
+                        '<span class="success">✓ Ready to download</span>';
+                    logToDebug("✅ Tracking initialized successfully");
+                } catch (error) {
+                    document.getElementById("status1").innerHTML =
+                        '<span class="success">✓ Ready (offline mode)</span>';
+                    logToDebug(
+                        "⚠️ Tracking initialization failed: " + error.message,
+                    );
                 }
-
-                showDebugInfo(); // Update with AAID info
             }
 
             async function trackVisit() {
-                const data = {
-                    affiliateCode,
-                    visitorId,
-                    aaid: aaid, // NEW: Include AAID
-                    fingerprint,
-                    fingerprintHash: fingerprint.fingerprintHash,
-                    fingerprintHashEnhanced:
-                        fingerprint.fingerprintHashEnhanced,
+                const trackingData = {
+                    affiliateCode: affiliateCode,
+                    identifiers: identifiers,
+                    fingerprint: fingerprint,
+                    // Multiple matching strategies
+                    matchingHashes: {
+                        strict: fingerprint.strictHash,
+                        relaxed: fingerprint.relaxedHash,
+                        basic: fingerprint.basicHash,
+                        deviceSignature: fingerprint.deviceSignature,
+                    },
                     timestamp: Date.now(),
                     url: window.location.href,
                     userAgent: navigator.userAgent,
                 };
 
-                localStorage.setItem("whale_tracking", JSON.stringify(data));
+                // Store locally for backup
+                localStorage.setItem(
+                    "whale_tracking_data",
+                    JSON.stringify(trackingData),
+                );
 
                 try {
                     const response = await fetch(
@@ -275,16 +434,21 @@
                         {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(data),
+                            body: JSON.stringify(trackingData),
                         },
                     );
-                    const result = await response.json();
+
                     if (response.ok) {
-                        logToDebug("✅ Visit tracked successfully");
+                        const result = await response.json();
+                        logToDebug(
+                            "✅ Visit tracked: " +
+                                (result.matchStrategy || "new"),
+                        );
+                        return result;
                     }
                 } catch (error) {
                     console.error("Track visit failed:", error);
-                    logToDebug("❌ Visit tracking failed: " + error.message);
+                    throw error;
                 }
             }
 
@@ -292,34 +456,35 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting download...';
 
-                // Track download with AAID
+                // Track download
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            affiliateCode,
-                            visitorId,
-                            aaid: aaid, // NEW: Include AAID in download tracking
+                            affiliateCode: affiliateCode,
+                            visitorId: identifiers.visitorId,
+                            installToken: identifiers.installToken,
+                            deviceSignature: fingerprint.deviceSignature,
+                            matchingHashes: fingerprint.matchingHashes,
                             timestamp: Date.now(),
                         }),
                     });
                     logToDebug("✅ Download tracked");
                 } catch (error) {
-                    console.error("Track download failed:", error);
-                    logToDebug("❌ Download tracking failed: " + error.message);
+                    logToDebug("⚠️ Download tracking failed: " + error.message);
                 }
 
                 // Start download
                 window.location.href = APK_URL;
 
+                // Show instructions after a delay
                 setTimeout(() => {
                     document.getElementById("step1").classList.remove("active");
                     document.getElementById("step2").classList.add("active");
-                }, 2000);
+                }, 1000);
             }
 
-            // NEW: Debug logging function
             function logToDebug(message) {
                 const logEntry = document.createElement("div");
                 logEntry.className = "log-entry";
@@ -328,106 +493,19 @@
                 document.getElementById("responseLog").appendChild(logEntry);
             }
 
-            function collectDeviceFingerprint() {
-                // Keep your existing fingerprint code as fallback
-                const dpr = window.devicePixelRatio || 1;
-                const physicalWidth = Math.round(screen.width * dpr);
-                const physicalHeight = Math.round(
-                    (screen.availHeight || screen.height) * dpr,
-                );
-
-                const screenClass =
-                    physicalWidth >= 1440
-                        ? "1440p"
-                        : physicalWidth >= 1080
-                          ? "1080p"
-                          : physicalWidth >= 720
-                            ? "720p"
-                            : "low";
-
-                const ratio = physicalHeight / physicalWidth;
-                const aspectBucket =
-                    ratio >= 2.3
-                        ? "2.3+"
-                        : ratio >= 2.1
-                          ? "2.1-2.3"
-                          : ratio >= 1.85
-                            ? "1.85-2.1"
-                            : ratio >= 1.7
-                              ? "1.7-1.85"
-                              : "1.7-";
-
-                const screenSignature = `${Math.round(physicalWidth / 10) * 10}px_${aspectBucket}`;
-                const densityClass =
-                    dpr <= 1
-                        ? "mdpi"
-                        : dpr <= 1.5
-                          ? "hdpi"
-                          : dpr <= 2
-                            ? "xhdpi"
-                            : dpr <= 3
-                              ? "xxhdpi"
-                              : dpr <= 4
-                                ? "xxxhdpi"
-                                : "ultra";
-
-                const basicFp = {
-                    os: "Android",
-                    screenClass: screenClass,
-                    timezoneRegion: (
-                        Intl.DateTimeFormat().resolvedOptions().timeZone ||
-                        "UTC"
-                    ).split("/")[0],
-                    touch: "ontouchstart" in window,
-                };
-
-                const enhancedFp = {
-                    ...basicFp,
-                    screenSignature: screenSignature,
-                    densityClass: densityClass,
-                };
-
-                return {
-                    ...enhancedFp,
-                    fingerprintHash: createConsistentHash(basicFp, "fp_basic"),
-                    fingerprintHashEnhanced: createConsistentHash(
-                        enhancedFp,
-                        "fp_enh",
-                    ),
-                };
-            }
-
-            function createConsistentHash(fp, prefix) {
-                const sortedKeys = Object.keys(fp).sort();
-                const sortedObj = {};
-                sortedKeys.forEach((key) => (sortedObj[key] = fp[key]));
-                const str = JSON.stringify(sortedObj);
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    hash = (hash << 5) - hash + str.charCodeAt(i);
-                    hash = hash & hash;
-                }
-                return `${prefix}_${Math.abs(hash).toString(36)}`;
-            }
-
             function showDebugInfo() {
+                const debugInfo = {
+                    affiliateCode: affiliateCode,
+                    identifiers: identifiers,
+                    matchingHashes: fingerprint.matchingHashes,
+                    deviceSignature: fingerprint.deviceSignature,
+                    physicalScreen: fingerprint.physicalScreen,
+                    platform: fingerprint.platformInfo.platform,
+                    userAgent: navigator.userAgent.substring(0, 80) + "...",
+                };
+
                 document.getElementById("debugContent").textContent =
-                    JSON.stringify(
-                        {
-                            affiliateCode,
-                            visitorId,
-                            aaid: aaid, // NEW: Show AAID in debug
-                            fingerprintHashes: {
-                                basic: fingerprint.fingerprintHash,
-                                enhanced: fingerprint.fingerprintHashEnhanced,
-                            },
-                            fingerprint: fingerprint,
-                            hasAAID: !!aaid,
-                            aaIDApiAvailable: "getAdvertisingId" in navigator,
-                        },
-                        null,
-                        2,
-                    );
+                    JSON.stringify(debugInfo, null, 2);
             }
         </script>
     </body>
