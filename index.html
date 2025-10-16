@@ -208,157 +208,33 @@
                     localStorage.setItem("whale_visitor_id", visitorId);
                 }
 
-                // Installation token (for one-time matching)
-                let installToken = localStorage.getItem("whale_install_token");
-                if (!installToken) {
-                    installToken =
-                        "inst_" +
-                        Date.now() +
-                        "_" +
-                        Math.random().toString(36).substr(2, 12);
-                    localStorage.setItem("whale_install_token", installToken);
-                }
-
                 return {
                     visitorId: visitorId,
-                    installToken: installToken,
                     timestamp: Date.now(),
                 };
             }
 
-            async function getDualIPs() {
-                let publicIP = "unknown";
-                let privateIP = "unknown";
-
+            async function getPublicIP() {
                 try {
-                    // Get public IP
-                    const publicResponse = await fetch(
+                    const response = await fetch(
                         "https://api.ipify.org?format=json",
                     );
-                    const publicData = await publicResponse.json();
-                    publicIP = publicData.ip;
+                    const data = await response.json();
+                    return data.ip;
                 } catch (error) {
                     console.error("Failed to get public IP:", error);
+                    return "unknown";
                 }
-
-                try {
-                    // Try multiple methods for private IP
-                    privateIP = await getPrivateIPWithFallbacks();
-                } catch (error) {
-                    console.error("Failed to get private IP:", error);
-                    privateIP = "detection_failed";
-                }
-
-                return {
-                    public: publicIP,
-                    private: privateIP,
-                };
             }
 
-            async function getPrivateIPWithFallbacks() {
-                // Method 1: WebRTC (most reliable when it works)
-                const webrtcIP = await getPrivateIPWebRTC();
-                if (
-                    webrtcIP &&
-                    webrtcIP !== "webrtc_timeout" &&
-                    webrtcIP !== "webrtc_failed" &&
-                    webrtcIP !== "webrtc_unavailable"
-                ) {
-                    return webrtcIP;
-                }
-
-                // Method 2: Network Information API (newer browsers)
-                const networkIP = await getPrivateIPFromNetworkAPI();
-                if (networkIP && networkIP !== "network_api_unavailable") {
-                    return networkIP;
-                }
-
-                // Method 3: Use connection type as fallback
-                return "fallback_connection";
-            }
-
-            function getPrivateIPWebRTC() {
-                return new Promise((resolve) => {
-                    if (!window.RTCPeerConnection) {
-                        resolve("webrtc_unavailable");
-                        return;
-                    }
-
-                    const pc = new RTCPeerConnection({
-                        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-                    });
-
-                    let foundIP = false;
-
-                    pc.onicecandidate = (ice) => {
-                        if (!ice.candidate || foundIP) return;
-
-                        const candidate = ice.candidate.candidate;
-
-                        // Look for local IPs in candidate
-                        if (
-                            candidate.includes("typ host") ||
-                            candidate.includes("typ srflx")
-                        ) {
-                            const ipMatch = candidate.match(
-                                /([0-9]{1,3}(\.[0-9]{1,3}){3}|[a-f0-9:]+)/,
-                            );
-                            if (
-                                ipMatch &&
-                                ipMatch[1] &&
-                                !ipMatch[1].includes(":")
-                            ) {
-                                foundIP = true;
-                                resolve(ipMatch[1]);
-                                pc.close();
-                            }
-                        }
-                    };
-
-                    // Create data channel to trigger candidate gathering
-                    try {
-                        pc.createDataChannel("");
-                        pc.createOffer()
-                            .then((offer) => pc.setLocalDescription(offer))
-                            .catch(() => resolve("webrtc_failed"));
-                    } catch (error) {
-                        resolve("webrtc_error");
-                    }
-
-                    // Shorter timeout
-                    setTimeout(() => {
-                        if (!foundIP) {
-                            resolve("webrtc_timeout");
-                            try {
-                                pc.close();
-                            } catch (e) {}
-                        }
-                    }, 1500);
-                });
-            }
-
-            async function getPrivateIPFromNetworkAPI() {
-                // Method 2: Network Information API
+            function getNetworkType() {
                 if ("connection" in navigator) {
                     const connection = navigator.connection;
                     if (connection) {
-                        if (connection.type === "wifi")
-                            return "wifi_connection";
-                        if (connection.type === "cellular")
-                            return "cellular_connection";
-                        if (connection.type === "ethernet")
-                            return "ethernet_connection";
-                        return `connection_${connection.type}`;
+                        return connection.type || "unknown";
                     }
                 }
-
-                // Method 3: User agent detection
-                if (navigator.userAgent.match(/Android/i))
-                    return "android_device";
-                if (navigator.userAgent.match(/iPhone|iPad/i))
-                    return "ios_device";
-
-                return "network_api_unavailable";
+                return "unknown";
             }
 
             async function collectEnhancedFingerprint() {
@@ -368,8 +244,9 @@
                     (screen.availHeight || screen.height) * dpr,
                 );
 
-                // Get IP information
-                const ips = await getDualIPs();
+                // Get public IP and network info
+                const publicIP = await getPublicIP();
+                const networkType = getNetworkType();
 
                 // Calculate physical dimensions
                 const physicalScreen = {
@@ -382,16 +259,13 @@
                     ),
                 };
 
-                // Browser and OS detection
+                // Platform detection (no user agent)
                 const platformInfo = {
-                    userAgent: navigator.userAgent,
                     platform: navigator.platform,
-                    vendor: navigator.vendor,
                     language: navigator.language,
                     languages: navigator.languages
                         ? navigator.languages.join(",")
                         : "",
-                    cookieEnabled: navigator.cookieEnabled,
                     maxTouchPoints: navigator.maxTouchPoints || 0,
                 };
 
@@ -399,11 +273,6 @@
                 const localeInfo = {
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                     locale: navigator.language,
-                    region:
-                        (
-                            Intl.DateTimeFormat().resolvedOptions().timeZone ||
-                            ""
-                        ).split("/")[0] || "Unknown",
                 };
 
                 // Hardware capabilities
@@ -415,16 +284,18 @@
                     orientation: getOrientation(),
                 };
 
-                // Combine all fingerprints with IP data
+                // Combine all fingerprints
                 const combinedFingerprint = {
-                    // IP addresses for network-level identification
-                    ips: ips,
+                    // Network identification
+                    publicIP: publicIP,
+                    networkType: networkType,
 
                     // Core device identity
                     deviceSignature: createDeviceSignature(
                         physicalScreen,
                         platformInfo,
-                        ips,
+                        publicIP,
+                        networkType,
                     ),
 
                     // Individual components for matching
@@ -437,14 +308,14 @@
                     strictHash: createStrictHash(
                         physicalScreen,
                         platformInfo,
-                        ips,
+                        publicIP,
                     ),
                     relaxedHash: createRelaxedHash(
                         physicalScreen,
                         localeInfo,
-                        ips,
+                        publicIP,
                     ),
-                    basicHash: createBasicHash(physicalScreen, ips),
+                    basicHash: createBasicHash(physicalScreen, publicIP),
                 };
 
                 return combinedFingerprint;
@@ -467,71 +338,61 @@
                     : "portrait";
             }
 
-            function createDeviceSignature(physicalScreen, platformInfo, ips) {
+            function createDeviceSignature(
+                physicalScreen,
+                platformInfo,
+                publicIP,
+                networkType,
+            ) {
                 const signatureData = {
-                    bucket: physicalScreen.screenBucket,
+                    width: physicalScreen.physicalWidth,
+                    height: physicalScreen.physicalHeight,
                     dpr: Math.round(physicalScreen.dpr * 10) / 10,
-                    region: platformInfo.language
-                        ? platformInfo.language.split("-")[1] || "unknown"
-                        : "unknown",
-                    publicIP: ips.public,
-                    privateIP: ips.private,
-                    userAgentHash: hashString(
-                        platformInfo.userAgent.substring(0, 100),
-                    ),
+                    bucket: physicalScreen.screenBucket,
+                    platform: platformInfo.platform,
+                    language: platformInfo.language,
+                    publicIP: publicIP,
+                    networkType: networkType,
                 };
                 return `device_${hashObject(signatureData)}`;
             }
 
-            function createStrictHash(physicalScreen, platformInfo, ips) {
+            function createStrictHash(physicalScreen, platformInfo, publicIP) {
                 const data = {
                     physicalWidth: physicalScreen.physicalWidth,
                     physicalHeight: physicalScreen.physicalHeight,
                     dpr: physicalScreen.dpr,
                     platform: platformInfo.platform,
                     concurrency: platformInfo.hardwareConcurrency,
-                    publicIP: ips.public,
-                    privateIP: ips.private,
+                    publicIP: publicIP,
                     language: platformInfo.language,
                 };
                 return `strict_${hashObject(data)}`;
             }
 
-            function createRelaxedHash(physicalScreen, localeInfo, ips) {
+            function createRelaxedHash(physicalScreen, localeInfo, publicIP) {
                 const data = {
                     screenBucket: physicalScreen.screenBucket,
                     dpr: Math.round(physicalScreen.dpr),
                     timezone: localeInfo.timezone,
                     language: localeInfo.locale,
-                    publicIP: ips.public,
-                    privateIP: ips.private,
+                    publicIP: publicIP,
                 };
                 return `relaxed_${hashObject(data)}`;
             }
 
-            function createBasicHash(physicalScreen, ips) {
+            function createBasicHash(physicalScreen, publicIP) {
                 const data = {
                     width: Math.round(physicalScreen.physicalWidth / 10) * 10,
                     height: Math.round(physicalScreen.physicalHeight / 10) * 10,
                     dpr: Math.round(physicalScreen.dpr),
-                    publicIP: ips.public,
-                    privateIP: ips.private,
+                    publicIP: publicIP,
                 };
                 return `basic_${hashObject(data)}`;
             }
 
             function hashObject(obj) {
                 const str = JSON.stringify(obj, Object.keys(obj).sort());
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const char = str.charCodeAt(i);
-                    hash = (hash << 5) - hash + char;
-                    hash = hash & hash;
-                }
-                return Math.abs(hash).toString(36);
-            }
-
-            function hashString(str) {
                 let hash = 0;
                 for (let i = 0; i < str.length; i++) {
                     const char = str.charCodeAt(i);
@@ -576,7 +437,6 @@
                     },
                     timestamp: Date.now(),
                     url: window.location.href,
-                    userAgent: navigator.userAgent,
                 };
 
                 // Store locally for backup
@@ -613,10 +473,9 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting download...';
 
-                const installId = identifiers.installToken;
                 const fingerprint = await collectEnhancedFingerprint();
 
-                // Track the download with dual IP fingerprint
+                // Track the download with public IP fingerprint
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
@@ -624,21 +483,24 @@
                         body: JSON.stringify({
                             affiliateCode: affiliateCode,
                             visitorId: identifiers.visitorId,
-                            installToken: installId,
                             deviceSignature: fingerprint.deviceSignature,
                             matchingHashes: fingerprint.matchingHashes,
-                            ips: fingerprint.ips,
+                            publicIP: fingerprint.publicIP,
+                            networkType: fingerprint.networkType,
                             timestamp: Date.now(),
                         }),
                     });
-                    logToDebug("✅ Download tracked with dual IP fingerprint");
-                    logToDebug(`   Public IP: ${fingerprint.ips.public}`);
-                    logToDebug(`   Private IP: ${fingerprint.ips.private}`);
+                    logToDebug("✅ Download tracked with fingerprint");
+                    logToDebug(`   Public IP: ${fingerprint.publicIP}`);
+                    logToDebug(`   Network Type: ${fingerprint.networkType}`);
+                    logToDebug(
+                        `   Screen: ${fingerprint.physicalScreen.physicalWidth}x${fingerprint.physicalScreen.physicalHeight}`,
+                    );
                 } catch (error) {
                     logToDebug("⚠️ Download tracking failed: " + error.message);
                 }
 
-                // Start download with simple URL (no parameters needed)
+                // Start download with simple URL
                 window.location.href = APK_BASE_URL;
 
                 // Show instructions
@@ -661,13 +523,15 @@
 
                 const debugInfo = {
                     affiliateCode: affiliateCode,
-                    identifiers: identifiers,
-                    ips: fingerprint.ips,
+                    visitorId: identifiers.visitorId,
+                    publicIP: fingerprint.publicIP,
+                    networkType: fingerprint.networkType,
                     matchingHashes: fingerprint.matchingHashes,
                     deviceSignature: fingerprint.deviceSignature,
                     physicalScreen: fingerprint.physicalScreen,
                     platform: fingerprint.platformInfo.platform,
-                    userAgent: navigator.userAgent.substring(0, 80) + "...",
+                    language: fingerprint.platformInfo.language,
+                    timezone: fingerprint.localeInfo.timezone,
                 };
 
                 document.getElementById("debugContent").textContent =
