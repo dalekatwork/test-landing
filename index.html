@@ -459,6 +459,11 @@
                 const installId = identifiers.installToken;
                 const downloadUrl = `${APK_BASE_URL}?install_id=${encodeURIComponent(installId)}&ref=${encodeURIComponent(affiliateCode)}`;
 
+                console.log("🔗 Download URL:", downloadUrl);
+                logToDebug("🔗 Generated Download URL: " + downloadUrl);
+
+                localStorage.setItem("debug_download_url", downloadUrl);
+
                 // Track the download with this install_id - ADD TIMEOUT
                 try {
                     const trackingPromise = fetch(
