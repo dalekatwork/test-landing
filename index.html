@@ -215,19 +215,33 @@
             }
 
             function collectDeviceFingerprint() {
-                // Use logical screen width (matches Android widthPixels)
-                const logicalWidth = screen.width;
+                // CRITICAL FIX: Use physical pixels, not CSS pixels
+                const dpr = window.devicePixelRatio || 1;
+                const physicalWidth = Math.round(screen.width * dpr);
+                const physicalHeight = Math.round(
+                    (screen.availHeight || screen.height) * dpr,
+                );
+
+                console.log("📱 Device info:", {
+                    cssWidth: screen.width,
+                    cssHeight: screen.height,
+                    dpr: dpr,
+                    physicalWidth: physicalWidth,
+                    physicalHeight: physicalHeight,
+                });
+
+                // Screen class based on physical width
                 const screenClass =
-                    logicalWidth >= 1440
+                    physicalWidth >= 1440
                         ? "1440p"
-                        : logicalWidth >= 1080
+                        : physicalWidth >= 1080
                           ? "1080p"
-                          : logicalWidth >= 720
+                          : physicalWidth >= 720
                             ? "720p"
                             : "low";
 
-                // Aspect ratio
-                const ratio = screen.height / screen.width;
+                // Aspect ratio based on physical dimensions
+                const ratio = physicalHeight / physicalWidth;
                 const aspectBucket =
                     ratio >= 2.3
                         ? "2.3+"
@@ -239,10 +253,10 @@
                               ? "1.7-1.85"
                               : "1.7-";
 
-                const screenSignature = `${Math.round(logicalWidth / 10) * 10}px_${aspectBucket}`;
+                // Round physical width to nearest 10
+                const screenSignature = `${Math.round(physicalWidth / 10) * 10}px_${aspectBucket}`;
 
-                // Density class (based on DPR)
-                const dpr = window.devicePixelRatio || 1;
+                // Density class
                 const densityClass =
                     dpr <= 1
                         ? "mdpi"
@@ -256,7 +270,7 @@
                                 ? "xxxhdpi"
                                 : "ultra";
 
-                // Fingerprint WITHOUT language (avoids Telegram vs system mismatch)
+                // Fingerprint WITHOUT language
                 const basicFp = {
                     os: "Android",
                     screenClass: screenClass,
@@ -333,7 +347,6 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting...';
 
-                // Track download
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
@@ -348,7 +361,6 @@
                     console.error("Track download failed:", error);
                 }
 
-                // Start APK download
                 window.location.href = APK_URL;
 
                 setTimeout(() => {
