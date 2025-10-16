@@ -217,7 +217,18 @@
 
             function generateVisitorId() {
                 let vid = localStorage.getItem("whale_visitor_id");
-                if (!vid) {
+
+                // Check if existing ID is in old format (too short)
+                const isOldFormat =
+                    vid && (vid.split("_").length < 4 || vid.length < 50);
+
+                if (!vid || isOldFormat) {
+                    if (isOldFormat) {
+                        console.log(
+                            "🔄 Upgrading old visitor ID format to enhanced format",
+                        );
+                    }
+
                     // Create a highly unique visitor ID with multiple entropy sources
                     const timestamp = Date.now();
                     const randomPart = Math.random().toString(36).substr(2, 9);
@@ -241,7 +252,10 @@
                     vid = `vid_${timestamp}_${randomPart}_${Math.abs(hash).toString(36)}_${randomPart2}`;
 
                     localStorage.setItem("whale_visitor_id", vid);
-                    console.log("🆔 Generated new visitor ID:", vid);
+                    console.log("🆔 Generated new enhanced visitor ID:", vid);
+                    console.log("🆔 Length:", vid.length, "chars");
+                } else {
+                    console.log("🆔 Using existing visitor ID:", vid);
                 }
                 return vid;
             }
