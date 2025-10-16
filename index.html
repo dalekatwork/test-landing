@@ -193,7 +193,6 @@
 
             // Generate identifiers
             const identifiers = generateIdentifiers();
-            const fingerprint = collectEnhancedFingerprint();
 
             // Initialize tracking immediately
             initializeTracking();
@@ -228,29 +227,88 @@
                 };
             }
 
-            function collectEnhancedFingerprint() {
+            async function getDualIPs() {
+                let publicIP = "unknown";
+                let privateIP = "unknown";
+
+                try {
+                    // Get public IP
+                    const publicResponse = await fetch(
+                        "https://api.ipify.org?format=json",
+                    );
+                    const publicData = await publicResponse.json();
+                    publicIP = publicData.ip;
+                } catch (error) {
+                    console.error("Failed to get public IP:", error);
+                }
+
+                try {
+                    // Get private IP via WebRTC
+                    privateIP = await getPrivateIP();
+                } catch (error) {
+                    console.error("Failed to get private IP:", error);
+                }
+
+                return {
+                    public: publicIP,
+                    private: privateIP,
+                };
+            }
+
+            function getPrivateIP() {
+                return new Promise((resolve) => {
+                    // Try WebRTC method first
+                    const pc = new RTCPeerConnection({
+                        iceServers: [],
+                    });
+
+                    pc.createDataChannel("");
+                    pc.createOffer()
+                        .then((offer) => pc.setLocalDescription(offer))
+                        .catch(() => resolve("webrtc_failed"));
+
+                    let foundIP = false;
+
+                    pc.onicecandidate = (ice) => {
+                        if (!ice.candidate || foundIP) return;
+
+                        const candidate = ice.candidate.candidate;
+                        // Parse IP from ICE candidate
+                        const ipMatch = candidate.match(
+                            /([0-9]{1,3}(\.[0-9]{1,3}){3})/,
+                        );
+                        if (ipMatch && ipMatch[1]) {
+                            foundIP = true;
+                            resolve(ipMatch[1]);
+                            pc.close();
+                        }
+                    };
+
+                    // Fallback timeout
+                    setTimeout(() => {
+                        if (!foundIP) {
+                            resolve("webrtc_timeout");
+                            pc.close();
+                        }
+                    }, 2000);
+                });
+            }
+
+            async function collectEnhancedFingerprint() {
                 const dpr = window.devicePixelRatio || 1;
                 const physicalWidth = Math.round(screen.width * dpr);
                 const physicalHeight = Math.round(
                     (screen.availHeight || screen.height) * dpr,
                 );
 
-                // Get precise device characteristics
-                const screenProps = {
-                    width: screen.width,
-                    height: screen.height,
-                    availWidth: screen.availWidth,
-                    availHeight: screen.availHeight,
-                    colorDepth: screen.colorDepth,
-                    pixelDepth: screen.pixelDepth,
-                };
+                // Get IP information
+                const ips = await getDualIPs();
 
-                // Calculate physical dimensions (most reliable)
+                // Calculate physical dimensions
                 const physicalScreen = {
                     physicalWidth: physicalWidth,
                     physicalHeight: physicalHeight,
                     dpr: dpr,
-                    // Standard Android screen size buckets
                     screenBucket: getScreenBucket(
                         physicalWidth,
                         physicalHeight,
@@ -290,12 +348,16 @@
                     orientation: getOrientation(),
                 };
 
-                // Combine all fingerprints
+                // Combine all fingerprints with IP data
                 const combinedFingerprint = {
+                    // IP addresses for network-level identification
+                    ips: ips,
+
                     // Core device identity
                     deviceSignature: createDeviceSignature(
                         physicalScreen,
                         platformInfo,
+                        ips,
                     ),
 
                     // Individual components for matching
@@ -305,9 +367,17 @@
                     hardwareInfo: hardwareInfo,
 
                     // Hashes for different matching strategies
-                    strictHash: createStrictHash(physicalScreen, platformInfo),
-                    relaxedHash: createRelaxedHash(physicalScreen, localeInfo),
-                    basicHash: createBasicHash(physicalScreen),
+                    strictHash: createStrictHash(
+                        physicalScreen,
+                        platformInfo,
+                        ips,
+                    ),
+                    relaxedHash: createRelaxedHash(
+                        physicalScreen,
+                        localeInfo,
+                        ips,
+                    ),
+                    basicHash: createBasicHash(physicalScreen, ips),
                 };
 
                 return combinedFingerprint;
@@ -315,8 +385,7 @@
 
             function getScreenBucket(width, height) {
                 const diagonal =
-                    Math.sqrt(width * width + height * height) / 160; // Convert to inches approximation
-
+                    Math.sqrt(width * width + height * height) / 160;
                 if (diagonal >= 6.5) return "large";
                 if (diagonal >= 5.5) return "medium";
                 return "small";
@@ -331,45 +400,49 @@
                     : "portrait";
             }
 
-            function createDeviceSignature(physicalScreen, platformInfo) {
-                // Create a stable device signature based on physical properties
+            function createDeviceSignature(physicalScreen, platformInfo, ips) {
                 const signatureData = {
                     bucket: physicalScreen.screenBucket,
-                    dpr: Math.round(physicalScreen.dpr * 10) / 10, // Round to 1 decimal
+                    dpr: Math.round(physicalScreen.dpr * 10) / 10,
                     region: platformInfo.language
                         ? platformInfo.language.split("-")[1] || "unknown"
                         : "unknown",
+                    publicIP: ips.public,
+                    privateIP: ips.private,
                 };
-
                 return `device_${hashObject(signatureData)}`;
             }
 
-            function createStrictHash(physicalScreen, platformInfo) {
+            function createStrictHash(physicalScreen, platformInfo, ips) {
                 const data = {
                     physicalWidth: physicalScreen.physicalWidth,
                     physicalHeight: physicalScreen.physicalHeight,
                     dpr: physicalScreen.dpr,
                     platform: platformInfo.platform,
                     concurrency: platformInfo.hardwareConcurrency,
+                    publicIP: ips.public,
+                    privateIP: ips.private,
                 };
                 return `strict_${hashObject(data)}`;
             }
 
-            function createRelaxedHash(physicalScreen, localeInfo) {
+            function createRelaxedHash(physicalScreen, localeInfo, ips) {
                 const data = {
                     screenBucket: physicalScreen.screenBucket,
                     dpr: Math.round(physicalScreen.dpr),
                     timezone: localeInfo.timezone,
                     language: localeInfo.locale,
+                    publicIP: ips.public,
                 };
                 return `relaxed_${hashObject(data)}`;
             }
 
-            function createBasicHash(physicalScreen) {
+            function createBasicHash(physicalScreen, ips) {
                 const data = {
-                    width: Math.round(physicalScreen.physicalWidth / 10) * 10, // Round to nearest 10px
+                    width: Math.round(physicalScreen.physicalWidth / 10) * 10,
                     height: Math.round(physicalScreen.physicalHeight / 10) * 10,
                     dpr: Math.round(physicalScreen.dpr),
+                    publicIP: ips.public,
                 };
                 return `basic_${hashObject(data)}`;
             }
@@ -406,11 +479,12 @@
             }
 
             async function trackVisit() {
+                const fingerprint = await collectEnhancedFingerprint();
+
                 const trackingData = {
                     affiliateCode: affiliateCode,
                     identifiers: identifiers,
                     fingerprint: fingerprint,
-                    // Multiple matching strategies
                     matchingHashes: {
                         strict: fingerprint.strictHash,
                         relaxed: fingerprint.relaxedHash,
@@ -453,18 +527,13 @@
             }
 
             async function startDownload() {
+                document.getElementById("status1").innerHTML =
+                    '<span class="loading"></span>Starting download...';
+
                 const installId = identifiers.installToken;
+                const fingerprint = await collectEnhancedFingerprint();
 
-                // Use URL fragment (hash) instead of query parameters
-                const downloadUrl = `${APK_BASE_URL}#install_id=${installId}&ref=${affiliateCode}`;
-
-                console.log(
-                    "🔗 NEW Download URL (with fragment):",
-                    downloadUrl,
-                );
-                logToDebug("🔗 Generated Download URL: " + downloadUrl);
-
-                // Track the download
+                // Track the download with dual IP fingerprint
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
@@ -475,19 +544,19 @@
                             installToken: installId,
                             deviceSignature: fingerprint.deviceSignature,
                             matchingHashes: fingerprint.matchingHashes,
+                            ips: fingerprint.ips,
                             timestamp: Date.now(),
-                            downloadUrl: downloadUrl, // Log the new URL
                         }),
                     });
-                    logToDebug(
-                        "✅ Download tracked with install_id: " + installId,
-                    );
+                    logToDebug("✅ Download tracked with dual IP fingerprint");
+                    logToDebug(`   Public IP: ${fingerprint.ips.public}`);
+                    logToDebug(`   Private IP: ${fingerprint.ips.private}`);
                 } catch (error) {
                     logToDebug("⚠️ Download tracking failed: " + error.message);
                 }
 
-                // Start download with fragment URL
-                window.location.href = downloadUrl;
+                // Start download with simple URL (no parameters needed)
+                window.location.href = APK_BASE_URL;
 
                 // Show instructions
                 setTimeout(() => {
@@ -504,19 +573,18 @@
                 document.getElementById("responseLog").appendChild(logEntry);
             }
 
-            function showDebugInfo() {
-                const installId = identifiers.installToken;
-                const downloadUrl = `${APK_BASE_URL}#install_id=${installId}&ref=${affiliateCode}`;
+            async function showDebugInfo() {
+                const fingerprint = await collectEnhancedFingerprint();
 
                 const debugInfo = {
                     affiliateCode: affiliateCode,
                     identifiers: identifiers,
+                    ips: fingerprint.ips,
                     matchingHashes: fingerprint.matchingHashes,
                     deviceSignature: fingerprint.deviceSignature,
                     physicalScreen: fingerprint.physicalScreen,
                     platform: fingerprint.platformInfo.platform,
                     userAgent: navigator.userAgent.substring(0, 80) + "...",
-                    generatedDownloadUrl: downloadUrl, // ADD THIS
                 };
 
                 document.getElementById("debugContent").textContent =
