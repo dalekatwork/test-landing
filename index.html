@@ -93,15 +93,6 @@
             .success {
                 color: #4caf50;
             }
-            .clipboard-notice {
-                background: #e3f2fd;
-                border: 2px solid #2196f3;
-                border-radius: 10px;
-                padding: 15px;
-                margin: 20px 0;
-                color: #1976d2;
-                font-weight: 500;
-            }
             .loading {
                 display: inline-block;
                 width: 20px;
@@ -161,10 +152,6 @@
                     ✓ Download Started
                 </h2>
 
-                <div class="clipboard-notice">
-                    📋 Tracking code copied to clipboard!
-                </div>
-
                 <div class="instructions">
                     <p style="font-weight: 600; margin-bottom: 15px">
                         Installation Steps:
@@ -180,14 +167,14 @@
                         style="
                             margin-top: 15px;
                             padding: 10px;
-                            background: #fff3cd;
+                            background: #e8f5e9;
                             border-radius: 5px;
                             font-size: 14px;
+                            color: #2e7d32;
                         "
                     >
-                        <strong>Important:</strong> The app will automatically
-                        read the tracking code from your clipboard for accurate
-                        attribution.
+                        ✅ Attribution will happen automatically on first
+                        launch.
                     </p>
                 </div>
             </div>
@@ -210,105 +197,75 @@
                 urlParams.get("ref") || urlParams.get("code") || "organic";
             const visitorId = generateVisitorId();
 
-            // Initialize on page load
-            const fingerprint = collectEnhancedFingerprint();
+            const fingerprint = collectDeviceFingerprint();
             showDebugInfo();
             trackVisit();
 
             function generateVisitorId() {
                 let vid = localStorage.getItem("whale_visitor_id");
-
-                // Check if existing ID is in old format (too short)
-                const isOldFormat =
-                    vid && (vid.split("_").length < 4 || vid.length < 50);
-
-                if (!vid || isOldFormat) {
-                    if (isOldFormat) {
-                        console.log(
-                            "🔄 Upgrading old visitor ID format to enhanced format",
-                        );
-                    }
-
-                    // Create a highly unique visitor ID with multiple entropy sources
-                    const timestamp = Date.now();
-                    const randomPart = Math.random().toString(36).substr(2, 9);
-                    const randomPart2 = Math.random().toString(36).substr(2, 9);
-
-                    // Add browser-specific entropy
-                    const screenEntropy = `${screen.width}x${screen.height}x${window.devicePixelRatio}`;
-                    const navEntropy = `${navigator.hardwareConcurrency || 0}${navigator.deviceMemory || 0}`;
-
-                    // Create a complex hash from all entropy sources
-                    const entropyString = `${timestamp}${randomPart}${randomPart2}${screenEntropy}${navEntropy}${navigator.userAgent}`;
-
-                    // Simple hash function
-                    let hash = 0;
-                    for (let i = 0; i < entropyString.length; i++) {
-                        hash = (hash << 5) - hash + entropyString.charCodeAt(i);
-                        hash = hash & hash;
-                    }
-
-                    // Combine everything into a super unique ID
-                    vid = `vid_${timestamp}_${randomPart}_${Math.abs(hash).toString(36)}_${randomPart2}`;
-
+                if (!vid) {
+                    vid =
+                        "vid_" +
+                        Date.now() +
+                        "_" +
+                        Math.random().toString(36).substr(2, 9);
                     localStorage.setItem("whale_visitor_id", vid);
-                    console.log("🆔 Generated new enhanced visitor ID:", vid);
-                    console.log("🆔 Length:", vid.length, "chars");
-                } else {
-                    console.log("🆔 Using existing visitor ID:", vid);
                 }
                 return vid;
             }
 
-            function collectEnhancedFingerprint() {
-                // TIER 1: Basic cross-platform
-                const lang = (navigator.language || "en")
-                    .split("-")[0]
-                    .toLowerCase();
-                const tzRegion = (
-                    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-                ).split("/")[0];
+            function collectDeviceFingerprint() {
+                // Use logical screen width (matches Android widthPixels)
+                const logicalWidth = screen.width;
+                const screenClass =
+                    logicalWidth >= 1440
+                        ? "1440p"
+                        : logicalWidth >= 1080
+                          ? "1080p"
+                          : logicalWidth >= 720
+                            ? "720p"
+                            : "low";
 
-                const dpi = window.devicePixelRatio || 1;
-                const physicalWidth = Math.round(screen.width * dpi);
+                // Aspect ratio
+                const ratio = screen.height / screen.width;
+                const aspectBucket =
+                    ratio >= 2.3
+                        ? "2.3+"
+                        : ratio >= 2.1
+                          ? "2.1-2.3"
+                          : ratio >= 1.85
+                            ? "1.85-2.1"
+                            : ratio >= 1.7
+                              ? "1.7-1.85"
+                              : "1.7-";
 
-                let screenClass;
-                if (physicalWidth >= 1440) screenClass = "1440p";
-                else if (physicalWidth >= 1080) screenClass = "1080p";
-                else if (physicalWidth >= 720) screenClass = "720p";
-                else screenClass = "low";
+                const screenSignature = `${Math.round(logicalWidth / 10) * 10}px_${aspectBucket}`;
 
+                // Density class (based on DPR)
+                const dpr = window.devicePixelRatio || 1;
+                const densityClass =
+                    dpr <= 1
+                        ? "mdpi"
+                        : dpr <= 1.5
+                          ? "hdpi"
+                          : dpr <= 2
+                            ? "xhdpi"
+                            : dpr <= 3
+                              ? "xxhdpi"
+                              : dpr <= 4
+                                ? "xxxhdpi"
+                                : "ultra";
+
+                // Fingerprint WITHOUT language (avoids Telegram vs system mismatch)
                 const basicFp = {
                     os: "Android",
                     screenClass: screenClass,
-                    language: lang,
-                    timezoneRegion: tzRegion,
+                    timezoneRegion: (
+                        Intl.DateTimeFormat().resolvedOptions().timeZone ||
+                        "UTC"
+                    ).split("/")[0],
                     touch: "ontouchstart" in window,
                 };
-
-                // TIER 2: Enhanced with forgiving screen details
-                const roundedWidth = Math.round(physicalWidth / 10) * 10;
-                const physicalHeight = Math.round(
-                    (screen.availHeight || screen.height) * dpi,
-                );
-
-                const ratio = physicalHeight / physicalWidth;
-                let aspectBucket;
-                if (ratio >= 2.3) aspectBucket = "2.3+";
-                else if (ratio >= 2.1) aspectBucket = "2.1-2.3";
-                else if (ratio >= 1.85) aspectBucket = "1.85-2.1";
-                else if (ratio >= 1.7) aspectBucket = "1.7-1.85";
-                else aspectBucket = "1.7-";
-
-                const screenSignature = `${roundedWidth}px_${aspectBucket}`;
-
-                let densityClass;
-                if (dpi <= 1) densityClass = "mdpi";
-                else if (dpi <= 1.5) densityClass = "hdpi";
-                else if (dpi <= 2) densityClass = "xhdpi";
-                else if (dpi <= 3) densityClass = "xxhdpi";
-                else if (dpi <= 4) densityClass = "xxxhdpi";
-                else densityClass = "ultra";
 
                 const enhancedFp = {
                     ...basicFp,
@@ -316,33 +273,27 @@
                     densityClass: densityClass,
                 };
 
-                // Generate tiered hashes
                 return {
                     ...enhancedFp,
-                    fingerprintHash: createConsistentFingerprintHash(
-                        basicFp,
-                        "fp_basic",
-                    ),
-                    fingerprintHashEnhanced: createConsistentFingerprintHash(
+                    fingerprintHash: createConsistentHash(basicFp, "fp_basic"),
+                    fingerprintHashEnhanced: createConsistentHash(
                         enhancedFp,
                         "fp_enh",
                     ),
                 };
             }
 
-            function createConsistentFingerprintHash(fp, prefix) {
+            function createConsistentHash(fp, prefix) {
                 const sortedKeys = Object.keys(fp).sort();
                 const sortedObj = {};
-                sortedKeys.forEach((key) => {
-                    sortedObj[key] = fp[key];
-                });
+                sortedKeys.forEach((key) => (sortedObj[key] = fp[key]));
                 const str = JSON.stringify(sortedObj);
                 let hash = 0;
                 for (let i = 0; i < str.length; i++) {
                     hash = (hash << 5) - hash + str.charCodeAt(i);
                     hash = hash & hash;
                 }
-                return prefix + "_" + Math.abs(hash).toString(36);
+                return `${prefix}_${Math.abs(hash).toString(36)}`;
             }
 
             async function trackVisit() {
@@ -357,15 +308,9 @@
                     url: window.location.href,
                 };
 
-                console.log("🔍 Fingerprint tiers:", {
-                    basic: fingerprint.fingerprintHash,
-                    enhanced: fingerprint.fingerprintHashEnhanced,
-                });
-
                 localStorage.setItem("whale_tracking", JSON.stringify(data));
 
                 try {
-                    logResponse("📤 Tracking visit...", data);
                     const response = await fetch(
                         API_ENDPOINT + "/track-visit",
                         {
@@ -374,17 +319,13 @@
                             body: JSON.stringify(data),
                         },
                     );
-
                     const result = await response.json();
                     if (response.ok) {
-                        logResponse("✅ Visit tracked", result);
                         document.getElementById("status1").innerHTML =
                             '<span class="success">✓ Ready</span>';
-                    } else {
-                        logResponse("❌ Error", result);
                     }
                 } catch (error) {
-                    logResponse("❌ Network error", error.message);
+                    console.error("Track visit failed:", error);
                 }
             }
 
@@ -392,31 +333,7 @@
                 document.getElementById("status1").innerHTML =
                     '<span class="loading"></span>Starting...';
 
-                // STEP 1: Create highly secure tracking data
-                const sessionToken = generateSessionToken();
-                const clipboardData = JSON.stringify({
-                    vid: visitorId,
-                    ref: affiliateCode,
-                    ts: Date.now(),
-                    sid: sessionToken, // Session-specific token
-                    fp: fingerprint.fingerprintHash, // Include fingerprint as backup
-                });
-
-                try {
-                    await navigator.clipboard.writeText(clipboardData);
-                    console.log("✅ Copied to clipboard:", clipboardData);
-                    logResponse("📋 Clipboard copy", {
-                        success: true,
-                        data: clipboardData,
-                    });
-                } catch (error) {
-                    console.error("❌ Clipboard copy failed:", error);
-                    logResponse("⚠️ Clipboard copy failed", {
-                        error: error.message,
-                    });
-                }
-
-                // STEP 2: Track download with session token
+                // Track download
                 try {
                     await fetch(API_ENDPOINT + "/track-download", {
                         method: "POST",
@@ -424,35 +341,20 @@
                         body: JSON.stringify({
                             affiliateCode,
                             visitorId,
-                            sessionToken,
                             timestamp: Date.now(),
                         }),
                     });
                 } catch (error) {
-                    console.error(error);
+                    console.error("Track download failed:", error);
                 }
 
-                // STEP 3: Start APK download
+                // Start APK download
                 window.location.href = APK_URL;
 
-                // STEP 4: Show instructions
                 setTimeout(() => {
                     document.getElementById("step1").classList.remove("active");
                     document.getElementById("step2").classList.add("active");
                 }, 2000);
-            }
-
-            function generateSessionToken() {
-                // Create a unique token for this specific download session
-                const timestamp = Date.now();
-                const random1 = Math.random().toString(36).substr(2, 12);
-                const random2 = Math.random().toString(36).substr(2, 12);
-                const performanceEntropy = performance
-                    .now()
-                    .toString(36)
-                    .replace(".", "");
-
-                return `sid_${timestamp}_${random1}${performanceEntropy}${random2}`;
             }
 
             function showDebugInfo() {
@@ -466,28 +368,10 @@
                                 enhanced: fingerprint.fingerprintHashEnhanced,
                             },
                             fingerprint: fingerprint,
-                            apiEndpoint: API_ENDPOINT,
-                            clipboardData: {
-                                vid: visitorId,
-                                ref: affiliateCode,
-                            },
                         },
                         null,
                         2,
                     );
-            }
-
-            function logResponse(message, data) {
-                const log = document.getElementById("responseLog");
-                const entry = document.createElement("div");
-                entry.className = "log-entry";
-                entry.innerHTML =
-                    "<strong>" +
-                    message +
-                    "</strong><br><pre>" +
-                    JSON.stringify(data, null, 2) +
-                    "</pre>";
-                log.appendChild(entry);
             }
         </script>
     </body>
